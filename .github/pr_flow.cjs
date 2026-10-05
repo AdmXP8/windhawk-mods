@@ -64,6 +64,14 @@ function isFlowEnabled(prNumber) {
   return ENABLED_PR_NUMBERS.length === 0 || ENABLED_PR_NUMBERS.includes(prNumber);
 }
 
+// While the AI reviewer is being worked on, an accepted /ai-review posts a
+// notice instead of queueing a review.
+const AI_REVIEW_UNAVAILABLE = false;
+
+const AI_REVIEW_UNAVAILABLE_COMMENT_BODY =
+  'The AI review bot is under construction, so no review was posted this time. ' +
+  'Please try again in a few hours.';
+
 // The flow doesn't start until the author asks for a review, so a newly opened
 // pull request gets the instructions it takes to move it forward.
 const WELCOME_COMMENT_BODY =
@@ -321,22 +329,19 @@ async function getLastReviewedSha({ github, owner, repo, prNumber, botLogin }) {
 }
 
 /**
- * A command is a line of its own, either the first or the last one, so that it
- * can lead a comment or follow the explanation it goes with. The first line wins
- * when both are commands.
+ * A command is the first or the last word of a comment, so that it can lead a
+ * comment or follow the explanation it goes with. The first word wins when both
+ * are commands.
  *
  * @param {string} body
  * @returns {typeof AI_REVIEW_COMMAND | typeof READY_FOR_REVIEWER_COMMAND | null}
  */
 function parseCommand(body) {
-  const lines = body
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
+  const words = body.trim().split(/\s+/);
 
-  for (const line of [lines[0], lines[lines.length - 1]]) {
-    if (line === AI_REVIEW_COMMAND || line === READY_FOR_REVIEWER_COMMAND) {
-      return line;
+  for (const word of [words[0], words[words.length - 1]]) {
+    if (word === AI_REVIEW_COMMAND || word === READY_FOR_REVIEWER_COMMAND) {
+      return word;
     }
   }
 
@@ -439,6 +444,11 @@ async function runAiReview({ github, core, owner, repo, pullRequest, currentFlow
       `Comment \`${READY_FOR_REVIEWER_COMMAND}\` to hand this pull request over to a human reviewer directly. ` +
       `See the [pull request review process](${WIKI_URL}) for details.`
     );
+  }
+
+  if (AI_REVIEW_UNAVAILABLE) {
+    await postComment({ github, owner, repo, prNumber, body: AI_REVIEW_UNAVAILABLE_COMMENT_BODY });
+    return null;
   }
 
   await setFlowLabel({
